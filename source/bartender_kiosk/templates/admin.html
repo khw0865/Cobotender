@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Robot Bartender Admin</title>
+  <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+<header class="admin-top">
+  <div class="admin-brand">
+    <div class="login-logo mini">B</div>
+    <div>
+      <p class="eyebrow">CONTROL DASHBOARD</p>
+      <h1>Robot Bartender Admin</h1>
+    </div>
+  </div>
+  <a class="logout" href="/logout">로그아웃</a>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="robot"><span>🤖</span> 로봇 조작</button>
+  <button class="tab" data-tab="inventory"><span>📦</span> 재고 관리</button>
+  <button class="tab" data-tab="orders"><span>🧾</span> 주문 내역</button>
+</nav>
+
+<section id="robot" class="panel active">
+  <div id="busyBanner" class="busy-banner hidden">로봇 동작 중입니다. 비상정지를 제외한 조작이 제한됩니다.</div>
+  <div class="robot-layout">
+    <div class="control-card hero-card">
+      <div class="card-title">
+        <p class="eyebrow">JOINT CONTROL</p>
+        <h2>조인트 각도 제어</h2>
+      </div>
+      <div id="jointControls"></div>
+      <button class="primary robot-action" data-action="joint_move">조인트 이동</button>
+    </div>
+
+    <div class="control-card command-card">
+      <div class="card-title">
+        <p class="eyebrow">ROBOT COMMAND</p>
+        <h2>로봇 명령</h2>
+      </div>
+      <div class="command-grid">
+        <button class="robot-action" data-action="power_on">로봇팔 ON</button>
+        <button class="robot-action" data-action="power_off">로봇팔 OFF</button>
+        <button class="robot-action" data-action="home">Home Position</button>
+        <button class="robot-action" data-action="grip">Grip</button>
+        <button class="robot-action" data-action="ungrip">Ungrip</button>
+        <button onclick="robotAction('reset_error')">비상/오류 해제</button>
+      </div>
+      <button class="danger" onclick="robotAction('emergency_stop')">비상정지</button>
+      <button class="ghost" onclick="finishMotion()">동작 완료 처리</button>
+    </div>
+
+    <div class="control-card log-card">
+      <div class="card-title">
+        <p class="eyebrow">SYSTEM LOG</p>
+        <h2>로그 내역</h2>
+      </div>
+      <div id="logs" class="logs"></div>
+    </div>
+  </div>
+</section>
+
+<section id="inventory" class="panel">
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">WHISKY STOCK</p>
+      <h2>위스키 재고 관리</h2>
+      <p>병 단위로 입력하면 각 주종의 병 용량을 기준으로 잔여 ml가 계산됩니다.</p>
+    </div>
+    <button class="primary save-button" onclick="saveInventory()">재고 저장</button>
+  </div>
+  <div id="inventoryList" class="inventory-list"></div>
+</section>
+
+<section id="orders" class="panel">
+  <div class="section-head">
+    <div>
+      <p class="eyebrow">ORDER HISTORY</p>
+      <h2>주문 내역</h2>
+    </div>
+    <div class="sales-total">금일 총 판매금액 <strong id="todaySales">0원</strong></div>
+  </div>
+  <div class="table-card">
+    <table>
+      <thead><tr><th>날짜/시간</th><th>주문번호</th><th>주문 메뉴/수량</th><th>금액</th></tr></thead>
+      <tbody id="orderRows"></tbody>
+    </table>
+  </div>
+</section>
+
+<div id="staffModal" class="staff-modal hidden">
+  <div class="staff-card">
+    <div class="alert-icon">!</div>
+    <h2>직원 호출 알림</h2>
+    <p id="staffMessage"></p>
+    <button onclick="handleStaffRequest()">확인</button>
+  </div>
+</div>
+
+<script src="/static/js/admin.js"></script>
+</body>
+</html>

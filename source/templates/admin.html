@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Bartender Admin</title>
+  <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+<section class="admin-dashboard">
+  <header class="admin-topbar">
+    <div>
+      <p class="eyebrow">ROBOT MIXOLOGY CONTROL CENTER</p>
+      <h1>관리자 대시보드</h1>
+    </div>
+
+    <nav class="admin-nav">
+      <button onclick="location.href='/admin/inventory'">재고관리</button>
+      <button onclick="location.href='/admin/orders'">주문 내역</button>
+      <button onclick="location.href='/logout'">로그아웃</button>
+    </nav>
+
+    <div id="modeBadge" class="mode-badge idle">
+      <span class="mode-dot"></span>
+      <strong id="modeText">IDLE</strong>
+    </div>
+  </header>
+
+  <main class="dashboard-grid">
+    <section class="panel joint-panel">
+      <div class="panel-head">
+        <p class="eyebrow">ROBOT JOINT STATE</p>
+        <h2>현재 조인트 각도</h2>
+      </div>
+
+      <div class="joint-list">
+        <div class="joint-row"><span>J1</span><div class="joint-bar"><i id="jointBar1"></i></div><strong id="joint1">0.0°</strong></div>
+        <div class="joint-row"><span>J2</span><div class="joint-bar"><i id="jointBar2"></i></div><strong id="joint2">0.0°</strong></div>
+        <div class="joint-row"><span>J3</span><div class="joint-bar"><i id="jointBar3"></i></div><strong id="joint3">0.0°</strong></div>
+        <div class="joint-row"><span>J4</span><div class="joint-bar"><i id="jointBar4"></i></div><strong id="joint4">0.0°</strong></div>
+        <div class="joint-row"><span>J5</span><div class="joint-bar"><i id="jointBar5"></i></div><strong id="joint5">0.0°</strong></div>
+        <div class="joint-row"><span>J6</span><div class="joint-bar"><i id="jointBar6"></i></div><strong id="joint6">0.0°</strong></div>
+      </div>
+    </section>
+
+    <section class="panel status-panel">
+      <div class="panel-head">
+        <p class="eyebrow">SYSTEM STATUS</p>
+        <h2>상태 정보</h2>
+      </div>
+
+      <div class="status-cards">
+        <div class="status-card"><span>현재 모드</span><strong id="currentMode">IDLE</strong></div>
+        <div class="status-card"><span>현재 주문</span><strong id="currentRecipe">대기 중</strong></div>
+        <div class="status-card"><span>작업 단계</span><strong id="currentStep">Ready</strong></div>
+      </div>
+    </section>
+
+    <section class="panel speed-panel">
+      <div class="panel-head">
+        <p class="eyebrow">MOTION SPEED</p>
+        <h2>동작 속도</h2>
+      </div>
+
+      <div class="speed-grid">
+        <div class="speed-card">
+          <span>Linear</span>
+          <strong id="linearSpeed">0</strong>
+          <small>mm/s</small>
+        </div>
+        <div class="speed-card">
+          <span>Angular</span>
+          <strong id="angularSpeed">0</strong>
+          <small>deg/s</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel progress-panel">
+      <div class="panel-head">
+        <p class="eyebrow">TASK SEQUENCE</p>
+        <h2>작업 진행 정보</h2>
+      </div>
+
+      <ol id="taskSteps" class="task-steps">
+        <li class="active"><span>1</span><div><strong>주문 대기</strong><small>고객 주문을 기다리는 중</small></div></li>
+        <li><span>2</span><div><strong>잔 위치 이동</strong><small>글라스 픽업 위치로 이동</small></div></li>
+        <li><span>3</span><div><strong>재료 투입</strong><small>레시피에 따라 음료 주입</small></div></li>
+        <li><span>4</span><div><strong>믹싱</strong><small>혼합 동작 수행</small></div></li>
+        <li><span>5</span><div><strong>서빙 위치 이동</strong><small>완성 음료 전달 위치로 이동</small></div></li>
+      </ol>
+    </section>
+
+    <section class="panel command-panel">
+      <div class="panel-head">
+        <p class="eyebrow">ROBOT COMMAND</p>
+        <h2>로봇 명령</h2>
+      </div>
+
+      <div class="command-grid">
+        <button class="danger" onclick="sendRobotCommand('estop')">비상정지</button>
+        <button class="reset" onclick="sendRobotCommand('estop_reset')">비상정지 해제</button>
+      </div>
+    </section>
+
+    <section class="panel log-panel">
+      <div class="panel-head">
+        <p class="eyebrow">SYSTEM LOG</p>
+        <h2>로그 내역</h2>
+      </div>
+
+      <div id="logBox" class="log-box">
+        <p>[SYSTEM] Admin dashboard loaded.</p>
+      </div>
+    </section>
+  </main>
+</section>
+
+<script src="/static/js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+협동1\버전들\cobotender_ui_v4.6(게이지바,속도탭 변경)\__pycache__\app.cpython-313.pyc
+협동1\버전들\cobotender_ui_v4.7(키오스크 대기화면 수정)\__pycache__\app.cpython-313.pyc
+협동1\버전들\cobotender_ui_v4.8(안주주문 수정)\__pycache__\app.cpython-313.pyc
+협동1\버전들\cobotender_ui_v5.1(예외처리추가)\__pycache__\app.cpython-313.pyc
+협동1\버전들\cobotender_ui_v5.4(nodge 추가)\__pycache__\bartender.cpython-313.pyc
+협동1\협1 제출\D-1_협동1_김현우_이윤종_이주헌_전이준.mp4
+협동1\협1 제출\src\cobotender\cobotender\__pycache__\__init__.cpython-310.pyc
+협동1\협1 제출\src\cobotender\cobotender\__pycache__\app.cpython-310.pyc
+협동1\협1 제출\src\cobotender\cobotender\__pycache__\bartender_admin_control_bridge.cpython-310.pyc
+협동1\협1 제출\src\cobotender\cobotender\__pycache__\bartender.cpython-310.pyc
+협동1\src\cobotender\cobotender\__pycache__\__init__.cpython-310.pyc
+협동1\src\cobotender\cobotender\__pycache__\app.cpython-310.pyc
+협동1\src\cobotender\cobotender\__pycache__\bartender_admin_control_bridge.cpython-310.pyc
+협동1\src\cobotender\cobotender\__pycache__\bartender.cpython-310.pyc
+source\__pycache__\app.cpython-313.pyc
+source\새 폴더 1\__pycache__\app.cpython-313.pyc
+source\bartender_kiosk\__pycache__\app.cpython-313.pyc
+source\cobotender_ui_v4.6(게이지바,속도탭 변경)\__pycache__\app.cpython-313.pyc
+source\cobotender_ui_v4.7(키오스크 대기화면 수정)\__pycache__\app.cpython-313.pyc
+source\cobotender_ui_v4.8(안주주문 수정)\__pycache__\app.cpython-313.pyc
+source\cobotender_ui_v5.1(예외처리추가)\__pycache__\app.cpython-313.pyc
+source\cobotender_ui_v5.4(nodge 추가)\__pycache__\bartender.cpython-313.pyc
+source\src\cobotender\cobotender\__pycache__\__init__.cpython-310.pyc
+source\src\cobotender\cobotender\__pycache__\app.cpython-310.pyc
+source\src\cobotender\cobotender\__pycache__\bartender_admin_control_bridge.cpython-310.pyc
+source\src\cobotender\cobotender\__pycache__\bartender.cpython-310.pyc

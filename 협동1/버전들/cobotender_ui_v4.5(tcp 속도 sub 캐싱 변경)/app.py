@@ -1,0 +1,832 @@
+from flask import Flask, render_template, request, redirect, session, jsonify
+import sqlite3
+from pathlib import Path
+from datetime import datetime, date
+import math
+import threading
+import time
+
+
+try:
+    import rclpy
+    from rclpy.node import Node
+    from rclpy.executors import MultiThreadedExecutor
+    from sensor_msgs.msg import JointState
+    from std_msgs.msg import Bool
+    ROS_CORE_AVAILABLE = True
+except Exception as exc:
+    rclpy = None
+    Node = object
+    MultiThreadedExecutor = None
+    JointState = None
+    Bool = None
+    ROS_CORE_AVAILABLE = False
+    ROS_CORE_IMPORT_ERROR = str(exc)
+else:
+    ROS_CORE_IMPORT_ERROR = ''
+
+try:
+    from bartender_interfaces.msg import Menu, Status
+    BARTENDER_MSG_AVAILABLE = True
+except Exception as exc:
+    Menu = None
+    Status = None
+    BARTENDER_MSG_AVAILABLE = False
+    BARTENDER_MSG_IMPORT_ERROR = str(exc)
+else:
+    BARTENDER_MSG_IMPORT_ERROR = ''
+
+try:
+    from dsr_msgs2.srv import GetCurrentVelx
+    DSR_VELX_AVAILABLE = True
+except Exception as exc:
+    GetCurrentVelx = None
+    DSR_VELX_AVAILABLE = False
+    DSR_VELX_IMPORT_ERROR = str(exc)
+else:
+    DSR_VELX_IMPORT_ERROR = ''
+
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / 'database' / 'bar.db'
+
+app = Flask(__name__)
+app.secret_key = 'bartender-kiosk-dev-secret'
+
+
+COCKTAILS = [
+    ('cocktail', 'Old Fashioned', 9000, "Maker's Mark, 설탕, 비터, 오렌지 필을 혼합한 클래식 칵테일", 'cocktail_old_fashioned.jpg', 0, 0, 0),
+    ('cocktail', 'Mojito', 8500, 'Jameson, 라임, 민트, 설탕, 탄산수를 섞은 청량한 위스키 모히토', 'cocktail_mojito.jpg', 0, 0, 0),
+    ('cocktail', 'Whisky Sour', 9500, 'Johnnie Walker Black, 레몬 주스, 설탕 시럽을 섞은 산뜻한 칵테일', 'cocktail_sour.jpg', 0, 0, 0),
+]
+
+WHISKIES = [
+    ('straight', 'Macallan 12', 14000, '40% · 쉐리향이 진하고 부드러운 피니시', 'whisky_macallan12.jpg', 40, 30, 700),
+    ('straight', 'Glenfiddich 12', 11000, '40% · 배와 사과향이 산뜻한 싱글몰트', 'whisky_glenfiddich12.jpg', 40, 30, 700),
+    ('straight', 'Jameson', 8000, '40% · 부드럽고 가벼운 아이리시 위스키', 'whisky_jameson.jpg', 40, 30, 700),
+    ('straight', "Maker's Mark", 10000, '45% · 바닐라와 캐러멜 향이 강한 버번', 'whisky_makers.jpg', 45, 30, 750),
+    ('straight', "Ballantine's 17", 13000, '40% · 균형 잡힌 블렌디드 위스키', 'whisky_ballantines17.jpg', 40, 30, 700),
+    ('straight', 'Johnnie Walker Black', 9000, '40% · 스모키하고 묵직한 블렌디드 위스키', 'whisky_black.jpg', 40, 30, 700),
+]
+
+SNACKS = [
+    ('snack', '치즈 플래터', 12000, '위스키와 잘 어울리는 치즈와 견과 구성', 'snack_cheese.jpg', 0, 0, 0),
+    ('snack', '감자튀김', 7000, '바삭한 감자튀김과 케첩', 'snack_fries.jpg', 0, 0, 0),
+    ('snack', '나초', 8000, '나초칩, 살사, 치즈소스 구성', 'snack_nacho.jpg', 0, 0, 0),
+]
+
+REQUESTS = [
+    ('request', '물', 0, '직원에게 물 요청', 'request_water.jpg', 0, 0, 0),
+    ('request', '냅킨', 0, '직원에게 냅킨 요청', 'request_napkin.jpg', 0, 0, 0),
+    ('request', '직원호출', 0, '관리자 화면에 직원 호출 알림 전송', 'request_staff.jpg', 0, 0, 0),
+]
+
+COCKTAIL_RECIPES = {
+    'Old Fashioned': [
+        {'name': "Maker's Mark", 'ml': 45},
+    ],
+    'Mojito': [
+        {'name': 'Jameson', 'ml': 30},
+    ],
+    'Whisky Sour': [
+        {'name': 'Johnnie Walker Black', 'ml': 45},
+    ],
+}
+
+# UI 메뉴명을 bartender_final.py에서 사용하는 menu 코드로 변환합니다.
+# /ui/menu_command : bartender_interfaces/msg/Menu, field: menu(int)
+MENU_COMMAND_MAP = {
+    'Old Fashioned': 0,          # Whiskey cocktail
+    'Mojito': 1,                 # Vodka cocktail slot
+    'Whisky Sour': 2,            # Non-Alcohol cocktail slot
+    'Macallan 12': 3,            # STRAIGHT1
+    'Glenfiddich 12': 4,         # STRAIGHT2
+    'Jameson': 5,                # STRAIGHT3
+    "Maker's Mark": 6,          # STRAIGHT4
+    "Ballantine's 17": 7,       # STRAIGHT5
+    'Johnnie Walker Black': 8,   # STRAIGHT6
+}
+
+# /robot/process_state : bartender_interfaces/msg/Status
+# field: status(int)
+# 관리자 UI의 작업 진행 정보는 아래 status 값과 1:1로 매핑됩니다.
+ROBOT_STATUS_TEXT = {
+    0: ('IDLE', 'WAITING - 대기 중 / 주문 가능 상태', 0),
+    1: ('AUTO', 'MAKING - 음료 제조 중', 1),
+    2: ('AUTO', 'MAKING_DONE - 제조 완료', 2),
+    3: ('AUTO', 'DELIVERING - 손님한테 서빙 이동 중', 3),
+    4: ('AUTO', 'DELIVERED - 서빙 완료', 4),
+    5: ('AUTO', 'RETURNING_HOME - 초기 위치로 복귀 중', 5),
+}
+
+# get_current_velx는 Service 방식이라 HTTP 요청 안에서 직접 호출하지 않습니다.
+# 아래 주기로 백그라운드 스레드가 값을 갱신하고, 관리자 UI는 캐시된 값만 읽습니다.
+VELX_POLL_INTERVAL_SEC = 0.2
+VELX_SERVICE_NOT_READY_LOG_INTERVAL_SEC = 5.0
+
+
+def get_cocktail_shortage(cur, cocktail_name, qty=1):
+    recipe = COCKTAIL_RECIPES.get(cocktail_name, [])
+    for ing in recipe:
+        row = cur.execute(
+            'SELECT stock_ml FROM menu WHERE name=? AND category=?',
+            (ing['name'], 'straight')
+        ).fetchone()
+        required_ml = ing['ml'] * qty
+        if row is None or row['stock_ml'] < required_ml:
+            return ing['name']
+    return None
+
+
+# =============================
+# ROS2 Direct Bridge
+# =============================
+
+class DoosanRosBridge(Node if ROS_CORE_AVAILABLE else object):
+    def __init__(self):
+        if not ROS_CORE_AVAILABLE:
+            self.available = False
+            self.core_import_error = ROS_CORE_IMPORT_ERROR
+            self.bartender_msg_import_error = BARTENDER_MSG_IMPORT_ERROR
+            self.lock = threading.Lock()
+            self.last_joint_time = 0.0
+            self.joints = [0.0] * 6
+            self.current_velx = [0.0] * 6
+            self.last_velx_time = 0.0
+            self.last_velx_latency_ms = 0.0
+            self.velx_request_pending = False
+            self.velx_request_started_at = 0.0
+            self.velx_not_ready_last_log = 0.0
+            self.velx_poll_stop_event = threading.Event()
+            self.velx_poll_thread = None
+            self.command_logs = ['ROS2 import failed: ' + self.core_import_error]
+            self.last_mode = 'ERROR'
+            self.last_command = 'ROS2 연결 실패'
+            self.last_recipe = '대기 중'
+            self.last_task_index = 0
+            self.robot_status_raw = 0
+            return
+
+        super().__init__('bartender_admin_ui_bridge')
+
+        self.available = True
+        self.core_import_error = ''
+        self.bartender_msg_import_error = BARTENDER_MSG_IMPORT_ERROR if not BARTENDER_MSG_AVAILABLE else ''
+        self.last_joint_time = 0.0
+        self.joints = [0.0] * 6
+        self.current_velx = [0.0] * 6
+        self.last_velx_time = 0.0
+        self.last_velx_latency_ms = 0.0
+        self.velx_request_pending = False
+        self.velx_request_started_at = 0.0
+        self.velx_not_ready_last_log = 0.0
+        self.velx_poll_stop_event = threading.Event()
+        self.velx_poll_thread = None
+        self.command_logs = []
+        self.last_mode = 'IDLE'
+        self.last_command = 'Ready'
+        self.last_recipe = '대기 중'
+        self.last_task_index = 0
+        self.robot_status_raw = 0
+        self.lock = threading.Lock()
+
+        self.joint_topic = '/dsr01/joint_states'
+        self.create_subscription(JointState, self.joint_topic, self._joint_callback, 10)
+
+        self.menu_publisher = None
+        self.status_subscription = None
+        if BARTENDER_MSG_AVAILABLE:
+            self.menu_publisher = self.create_publisher(Menu, '/ui/menu_command', 10)
+            self.status_subscription = self.create_subscription(
+                Status,
+                '/robot/process_state',
+                self._process_state_callback,
+                10
+            )
+        else:
+            self._log('bartender_interfaces import failed: ' + self.bartender_msg_import_error)
+
+        self.emergency_publisher = self.create_publisher(Bool, '/ui/emergency_stop', 10)
+
+        self.velx_client = None
+        if DSR_VELX_AVAILABLE:
+            self.velx_client = self.create_client(GetCurrentVelx, '/dsr01/aux_control/get_current_velx')
+            self._start_velx_poll_thread()
+        else:
+            self._log('dsr_msgs2/srv/GetCurrentVelx import failed: ' + DSR_VELX_IMPORT_ERROR)
+
+        self._log('ROS2 bridge started. Subscribing ' + self.joint_topic)
+        if BARTENDER_MSG_AVAILABLE:
+            self._log('Publishing /ui/menu_command, subscribing /robot/process_state')
+        self._log('Publishing /ui/emergency_stop')
+
+    def _log(self, message):
+        stamp = datetime.now().strftime('%H:%M:%S')
+        with getattr(self, 'lock', threading.Lock()):
+            self.command_logs.insert(0, f'[{stamp}] {message}')
+            self.command_logs = self.command_logs[:80]
+
+    def _joint_callback(self, msg):
+        positions = list(msg.position)
+        # JointState position can be radian in many ROS2 systems.
+        # If values look like radians, convert to degrees for UI display.
+        if positions and max(abs(v) for v in positions[:6]) <= 6.5:
+            positions = [math.degrees(v) for v in positions]
+
+        with self.lock:
+            self.last_joint_time = time.time()
+            self.joints = [float(v) for v in positions[:6]] + [0.0] * max(0, 6 - len(positions))
+
+    def _process_state_callback(self, msg):
+        status = int(getattr(msg, 'status', 0))
+        mode, step, task_index = ROBOT_STATUS_TEXT.get(status, ('ERROR', '알 수 없는 상태', 0))
+
+        with self.lock:
+            self.robot_status_raw = status
+            self.last_mode = mode
+            self.last_command = step
+            self.last_task_index = task_index
+
+        self._log(f'Robot process state: {status} / {step}')
+
+    def _set_request_field(self, request, candidates, value):
+        for name in candidates:
+            if hasattr(request, name):
+                setattr(request, name, value)
+                return True
+        return False
+
+    def _extract_numeric_sequence(self, obj):
+        for name in ['velx', 'vel', 'data', 'current_velx', 'values']:
+            if hasattr(obj, name):
+                value = getattr(obj, name)
+                if isinstance(value, (list, tuple)):
+                    return [float(v) for v in value]
+                try:
+                    return [float(v) for v in list(value)]
+                except Exception:
+                    pass
+        for name in dir(obj):
+            if name.startswith('_'):
+                continue
+            try:
+                value = getattr(obj, name)
+            except Exception:
+                continue
+            if isinstance(value, (list, tuple)) and value and all(isinstance(v, (int, float)) for v in value):
+                return [float(v) for v in value]
+        return []
+
+    def _start_velx_poll_thread(self):
+        # Timer 대신 별도 daemon thread에서 주기적으로 Service 요청을 날립니다.
+        # HTTP API는 여기서 갱신된 self.current_velx 캐시만 읽으므로 UI 요청이 막히지 않습니다.
+        if self.velx_poll_thread is not None:
+            return
+        self.velx_poll_thread = threading.Thread(
+            target=self._velx_poll_loop,
+            name='get_current_velx_cache_thread',
+            daemon=True,
+        )
+        self.velx_poll_thread.start()
+        self._log(f'get_current_velx cache thread started ({VELX_POLL_INTERVAL_SEC:.1f}s)')
+
+    def _velx_poll_loop(self):
+        while self.available and rclpy is not None and rclpy.ok() and not self.velx_poll_stop_event.is_set():
+            try:
+                self._request_current_velx()
+            except Exception as exc:
+                self._log(f'get_current_velx poll error: {exc}')
+            self.velx_poll_stop_event.wait(VELX_POLL_INTERVAL_SEC)
+
+    def _request_current_velx(self):
+        if self.velx_client is None:
+            return
+
+        with self.lock:
+            if self.velx_request_pending:
+                return
+
+        if not self.velx_client.service_is_ready():
+            now = time.time()
+            if now - self.velx_not_ready_last_log >= VELX_SERVICE_NOT_READY_LOG_INTERVAL_SEC:
+                self.velx_not_ready_last_log = now
+                self._log('/dsr01/aux_control/get_current_velx service not ready')
+            return
+
+        request = GetCurrentVelx.Request()
+        # Doosan 서비스 버전에 따라 ref/reference 필드가 있는 경우가 있습니다.
+        # 기본 좌표계는 DR_BASE에 해당하는 0으로 요청합니다.
+        self._set_request_field(request, ['ref', 'reference', 'reference_frame'], 0)
+
+        with self.lock:
+            self.velx_request_pending = True
+            self.velx_request_started_at = time.time()
+
+        future = self.velx_client.call_async(request)
+        future.add_done_callback(self._current_velx_done)
+
+    def _current_velx_done(self, future):
+        try:
+            response = future.result()
+            velx = self._extract_numeric_sequence(response)
+            now = time.time()
+
+            if len(velx) >= 6:
+                with self.lock:
+                    self.current_velx = velx[:6]
+                    self.last_velx_time = now
+                    self.last_velx_latency_ms = max(0.0, (now - self.velx_request_started_at) * 1000.0)
+            elif len(velx) >= 3:
+                with self.lock:
+                    self.current_velx = velx[:3] + [0.0, 0.0, 0.0]
+                    self.last_velx_time = now
+                    self.last_velx_latency_ms = max(0.0, (now - self.velx_request_started_at) * 1000.0)
+        except Exception as exc:
+            self._log(f'get_current_velx failed: {exc}')
+        finally:
+            with self.lock:
+                self.velx_request_pending = False
+
+    def publish_menu_command(self, menu_code, label='', qty=1):
+        if not self.available:
+            return False, 'ROS2 사용 불가: ' + self.core_import_error
+
+        if not BARTENDER_MSG_AVAILABLE or self.menu_publisher is None:
+            return False, 'bartender_interfaces/msg/Menu를 import할 수 없습니다: ' + self.bartender_msg_import_error
+
+        try:
+            count = max(1, int(qty))
+            for _ in range(count):
+                msg = Menu()
+                msg.menu = int(menu_code)
+                self.menu_publisher.publish(msg)
+
+            with self.lock:
+                self.last_recipe = label or f'menu {menu_code}'
+                self.last_mode = 'AUTO'
+                self.last_command = '주문 전송'
+
+            self._log(f'Menu command published: {menu_code} / {label} x {count}')
+            return True, f'{label or menu_code} 주문 명령을 전송했습니다.'
+        except Exception as exc:
+            self._log(f'Menu command publish failed: {exc}')
+            return False, f'메뉴 명령 전송 실패: {exc}'
+
+    def publish_emergency_stop(self, flag=True):
+        if not self.available:
+            return False, 'ROS2 사용 불가: ' + self.core_import_error
+
+        try:
+            msg = Bool()
+            msg.data = bool(flag)
+            self.emergency_publisher.publish(msg)
+
+            with self.lock:
+                self.last_mode = 'ESTOP' if flag else 'IDLE'
+                self.last_command = 'Emergency Stop' if flag else 'Emergency Reset'
+                self.last_task_index = 0
+
+            self._log(f'Emergency stop published: {msg.data}')
+            if flag:
+                return True, '긴급 정지 신호를 전송했습니다.'
+            return True, '긴급 정지 해제 신호를 전송했습니다. bartender_final.py에서 False를 해제 신호로 처리해야 합니다.'
+        except Exception as exc:
+            self._log(f'Emergency publish failed: {exc}')
+            return False, f'긴급 정지 신호 전송 실패: {exc}'
+
+    def command(self, command):
+        if command == 'estop':
+            return self.publish_emergency_stop(True)
+
+        if command == 'estop_reset':
+            # 사용자가 지정한 토픽은 /ui/emergency_stop 하나뿐입니다.
+            # 해제 버튼은 같은 Bool 토픽에 False를 publish하도록 구성했습니다.
+            return self.publish_emergency_stop(False)
+
+        return False, f'{command} 명령은 현재 UI-제어코드 통신 규격에 포함되어 있지 않습니다.'
+
+    def status_payload(self):
+        with self.lock:
+            joints = list(self.joints)
+            current_velx = list(self.current_velx)
+            logs = list(self.command_logs)
+            last_joint_time = self.last_joint_time
+            last_velx_time = self.last_velx_time
+            last_velx_latency_ms = self.last_velx_latency_ms
+            velx_request_pending = self.velx_request_pending
+            mode = self.last_mode
+            recipe = self.last_recipe
+            step = self.last_command
+            task_index = self.last_task_index
+            status_raw = self.robot_status_raw
+
+        now = time.time()
+        ros_connected = self.available and (now - last_joint_time < 3.0)
+        velx_connected = DSR_VELX_AVAILABLE and last_velx_time > 0.0 and (now - last_velx_time < 3.0)
+        if not ros_connected:
+            mode = 'ERROR'
+
+        linear_speed = round(math.sqrt(sum(v * v for v in current_velx[:3])), 2)
+        angular_speed = round(math.sqrt(sum(v * v for v in current_velx[3:6])), 2)
+
+        return {
+            'mode': mode,
+            'joints': joints,
+            'recipe': recipe,
+            'step': step,
+            'speed': {
+                'linear': linear_speed,
+                'angular': angular_speed,
+            },
+            'taskIndex': task_index,
+            'logs': logs,
+            'robot_status_raw': status_raw,
+            'ros_available': self.available,
+            'ros_core_import_error': self.core_import_error,
+            'bartender_msg_import_error': self.bartender_msg_import_error,
+            'dsr_velx_available': DSR_VELX_AVAILABLE,
+            'dsr_velx_import_error': DSR_VELX_IMPORT_ERROR,
+            'dsr_velx_connected': velx_connected,
+            'dsr_velx_pending': velx_request_pending,
+            'dsr_velx_latency_ms': round(last_velx_latency_ms, 1),
+            'dsr_velx_cache_age_sec': round(now - last_velx_time, 2) if last_velx_time > 0.0 else None,
+        }
+
+
+robot_bridge = None
+ros_executor = None
+ros_thread = None
+
+
+def start_ros_bridge():
+    global robot_bridge, ros_executor, ros_thread
+
+    if robot_bridge is not None:
+        return
+
+    if ROS_CORE_AVAILABLE and not rclpy.ok():
+        rclpy.init()
+
+    robot_bridge = DoosanRosBridge()
+
+    if not ROS_CORE_AVAILABLE:
+        return
+
+    ros_executor = MultiThreadedExecutor(num_threads=2)
+    ros_executor.add_node(robot_bridge)
+    ros_thread = threading.Thread(target=ros_executor.spin, daemon=True)
+    ros_thread.start()
+
+
+# =============================
+# Database
+# =============================
+
+def db():
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def init_db():
+    DB_PATH.parent.mkdir(exist_ok=True)
+    con = db()
+    cur = con.cursor()
+    cur.executescript('''
+    CREATE TABLE IF NOT EXISTS menu(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL,
+        name TEXT UNIQUE NOT NULL,
+        price INTEGER NOT NULL,
+        description TEXT,
+        image TEXT,
+        alcohol REAL DEFAULT 0,
+        serving_ml INTEGER DEFAULT 0,
+        bottle_ml INTEGER DEFAULT 0,
+        stock_ml INTEGER DEFAULT 0,
+        sold_out INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS orders(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number TEXT UNIQUE NOT NULL,
+        created_at TEXT NOT NULL,
+        total_price INTEGER NOT NULL,
+        status TEXT DEFAULT 'completed'
+    );
+    CREATE TABLE IF NOT EXISTS order_items(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        menu_id INTEGER,
+        menu_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        unit_price INTEGER NOT NULL,
+        line_total INTEGER NOT NULL,
+        FOREIGN KEY(order_id) REFERENCES orders(id)
+    );
+    CREATE TABLE IF NOT EXISTS staff_requests(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_type TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        handled INTEGER DEFAULT 0
+    );
+    ''')
+
+    if cur.execute('SELECT COUNT(*) FROM menu').fetchone()[0] == 0:
+        for item in COCKTAILS + WHISKIES + SNACKS + REQUESTS:
+            category, name, price, desc, image, alcohol, serving_ml, bottle_ml = item
+            stock_ml = bottle_ml * 3 if bottle_ml else 999999
+            cur.execute('''
+                INSERT INTO menu(category,name,price,description,image,alcohol,serving_ml,bottle_ml,stock_ml)
+                VALUES(?,?,?,?,?,?,?,?,?)
+            ''', (category, name, price, desc, image, alcohol, serving_ml, bottle_ml, stock_ml))
+
+    con.commit()
+    con.close()
+
+
+def publish_robot_menu_commands(checked_items):
+    if robot_bridge is None:
+        return
+
+    for menu_item, qty in checked_items:
+        menu_code = MENU_COMMAND_MAP.get(menu_item['name'])
+        if menu_code is None:
+            continue
+
+        robot_bridge.publish_menu_command(menu_code, menu_item['name'], qty)
+
+
+# =============================
+# Page routes
+# =============================
+
+@app.route('/')
+def index():
+    return redirect('/customer')
+
+
+@app.route('/customer')
+def customer():
+    return render_template('customer.html')
+
+
+@app.route('/admin', methods=['GET', 'POST'])
+@app.route('/admin/', methods=['GET', 'POST'])
+def admin_login():
+    error = None
+    if request.method == 'POST':
+        if request.form.get('username') == 'admin' and request.form.get('password') == 'admin':
+            session['admin'] = True
+            return redirect('/admin/dashboard')
+        error = '아이디 또는 비밀번호를 확인하세요'
+    return render_template('admin_login.html', error=error)
+
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not session.get('admin'):
+        return redirect('/admin')
+    return render_template('admin.html')
+
+
+@app.route('/admin/inventory')
+def admin_inventory():
+    if not session.get('admin'):
+        return redirect('/admin')
+    return render_template('inventory.html')
+
+
+@app.route('/admin/orders')
+def admin_orders():
+    if not session.get('admin'):
+        return redirect('/admin')
+    return render_template('orders.html')
+
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/admin')
+
+
+# =============================
+# Customer / menu APIs
+# =============================
+
+@app.get('/api/menu')
+def api_menu():
+    con = db()
+    rows = [dict(r) for r in con.execute('SELECT * FROM menu ORDER BY category,id')]
+    cur = con.cursor()
+
+    for row in rows:
+        if row['category'] == 'straight':
+            row['sold_out'] = 1 if row['stock_ml'] < row['serving_ml'] else 0
+        elif row['category'] == 'cocktail':
+            row['sold_out'] = 1 if get_cocktail_shortage(cur, row['name'], 1) else 0
+        else:
+            row['sold_out'] = 0
+
+    con.close()
+    return jsonify(rows)
+
+
+@app.post('/api/order')
+def api_order():
+    data = request.get_json(force=True)
+    items = data.get('items', [])
+
+    if not items:
+        return jsonify({'ok': False, 'message': '장바구니가 비어있습니다.'}), 400
+
+    con = db()
+    cur = con.cursor()
+    menu_by_id = {r['id']: dict(r) for r in cur.execute('SELECT * FROM menu')}
+    checked = []
+    total = 0
+
+    for item in items:
+        menu_id = int(item['id'])
+        qty = int(item['qty'])
+        menu_item = menu_by_id.get(menu_id)
+
+        if not menu_item or qty <= 0:
+            continue
+
+        if menu_item['category'] == 'straight':
+            required = menu_item['serving_ml'] * qty
+            if menu_item['stock_ml'] < required:
+                con.close()
+                return jsonify({'ok': False, 'message': f'{menu_item["name"]} 재고가 부족합니다.'}), 409
+
+        if menu_item['category'] == 'cocktail':
+            shortage = get_cocktail_shortage(cur, menu_item['name'], qty)
+            if shortage:
+                con.close()
+                return jsonify({'ok': False, 'message': f'{menu_item["name"]} 제조에 필요한 {shortage} 재고가 부족합니다.'}), 409
+
+        checked.append((menu_item, qty))
+        total += menu_item['price'] * qty
+
+    if not checked:
+        con.close()
+        return jsonify({'ok': False, 'message': '주문 가능한 항목이 없습니다.'}), 400
+
+    order_number = 'A' + datetime.now().strftime('%Y%m%d%H%M%S')
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    cur.execute(
+        'INSERT INTO orders(order_number,created_at,total_price,status) VALUES(?,?,?,?)',
+        (order_number, now, total, 'completed')
+    )
+    order_id = cur.lastrowid
+
+    for menu_item, qty in checked:
+        cur.execute('''
+            INSERT INTO order_items(order_id,menu_id,menu_name,category,qty,unit_price,line_total)
+            VALUES(?,?,?,?,?,?,?)
+        ''', (
+            order_id,
+            menu_item['id'],
+            menu_item['name'],
+            menu_item['category'],
+            qty,
+            menu_item['price'],
+            menu_item['price'] * qty,
+        ))
+
+        if menu_item['category'] == 'straight':
+            cur.execute(
+                'UPDATE menu SET stock_ml = MAX(stock_ml - ?, 0) WHERE id=?',
+                (menu_item['serving_ml'] * qty, menu_item['id'])
+            )
+
+        if menu_item['category'] == 'cocktail':
+            for ing in COCKTAIL_RECIPES.get(menu_item['name'], []):
+                cur.execute(
+                    'UPDATE menu SET stock_ml = MAX(stock_ml - ?, 0) WHERE name=? AND category=?',
+                    (ing['ml'] * qty, ing['name'], 'straight')
+                )
+
+        if menu_item['category'] == 'request':
+            cur.execute(
+                'INSERT INTO staff_requests(request_type,created_at) VALUES(?,?)',
+                (menu_item['name'], now)
+            )
+
+    con.commit()
+    con.close()
+
+    publish_robot_menu_commands(checked)
+
+    return jsonify({'ok': True, 'order_number': order_number, 'total': total})
+
+
+# =============================
+# Admin APIs
+# =============================
+
+@app.get('/api/inventory')
+def api_inventory():
+    con = db()
+    rows = [dict(r) for r in con.execute("SELECT * FROM menu WHERE category='straight' ORDER BY id")]
+    con.close()
+    return jsonify(rows)
+
+
+@app.post('/api/inventory')
+def api_inventory_update():
+    data = request.get_json(force=True)
+    con = db()
+    cur = con.cursor()
+
+    for row in data.get('items', []):
+        menu_id = int(row['id'])
+        bottles = max(0, int(row['bottles']))
+        bottle_row = cur.execute('SELECT bottle_ml FROM menu WHERE id=?', (menu_id,)).fetchone()
+        if not bottle_row:
+            continue
+        cur.execute('UPDATE menu SET stock_ml=? WHERE id=?', (bottles * bottle_row['bottle_ml'], menu_id))
+
+    con.commit()
+    con.close()
+    return jsonify({'ok': True})
+
+
+@app.get('/api/orders')
+def api_orders():
+    con = db()
+    cur = con.cursor()
+    orders = []
+
+    for order in cur.execute('SELECT * FROM orders ORDER BY id DESC LIMIT 200'):
+        items = [dict(i) for i in con.execute(
+            'SELECT menu_name,qty,line_total FROM order_items WHERE order_id=?',
+            (order['id'],)
+        )]
+        order_dict = dict(order)
+        order_dict['items'] = items
+        orders.append(order_dict)
+
+    today = date.today().strftime('%Y-%m-%d')
+    total_today = cur.execute(
+        "SELECT COALESCE(SUM(total_price),0) FROM orders WHERE substr(created_at,1,10)=?",
+        (today,)
+    ).fetchone()[0]
+
+    con.close()
+    return jsonify({'orders': orders, 'total_today': total_today})
+
+
+@app.get('/api/staff_requests')
+def api_staff_requests():
+    con = db()
+    rows = [dict(r) for r in con.execute('SELECT * FROM staff_requests WHERE handled=0 ORDER BY id')]
+    con.close()
+    return jsonify(rows)
+
+
+@app.post('/api/staff_requests/<int:req_id>/handle')
+def api_staff_handle(req_id):
+    con = db()
+    con.execute('UPDATE staff_requests SET handled=1 WHERE id=?', (req_id,))
+    con.commit()
+    con.close()
+    return jsonify({'ok': True})
+
+
+@app.get('/api/robot/status')
+def api_robot_status():
+    if robot_bridge is None:
+        return jsonify({
+            'mode': 'ERROR',
+            'joints': [0, 0, 0, 0, 0, 0],
+            'recipe': '대기 중',
+            'step': 'ROS bridge not started',
+            'speed': {'linear': 0, 'angular': 0},
+            'taskIndex': 0,
+            'logs': ['ROS bridge not started'],
+        })
+    return jsonify(robot_bridge.status_payload())
+
+
+@app.post('/api/robot/command')
+def api_robot_command():
+    command = request.get_json(force=True).get('command')
+
+    if robot_bridge is None:
+        return jsonify({'ok': False, 'message': 'ROS bridge가 시작되지 않았습니다.'}), 503
+
+    ok, message = robot_bridge.command(command)
+    return jsonify({'ok': ok, 'message': message}), (200 if ok else 503)
+
+
+def main(args=None):
+    init_db()
+    start_ros_bridge()
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+
+
+if __name__ == '__main__':
+    main()

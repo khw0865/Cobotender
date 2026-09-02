@@ -1,0 +1,146 @@
+# 🍸 CoboTender UI
+
+Doosan Robotics Boot Camp Project
+
+------------------------------------------------------------------------
+
+# 프로젝트 소개
+
+CoboTender는 Doosan Robot을 이용한 **바텐더 로봇 시스템**입니다.
+
+본 프로젝트는 고객용 키오스크 UI, 관리자용 UI, Flask, SQLite3, ROS2
+통신을 이용하여 주문부터 제조까지 하나의 시스템으로 구성하였습니다.
+
+## 개발 환경
+
+-   Ubuntu 22.04
+-   Python 3.10
+-   ROS2 Humble
+-   Flask
+-   SQLite3
+-   HTML / CSS / JavaScript
+
+## 프로젝트 구조
+
+``` text
+cobotender_ui_v4.1
+├── app.py
+├── database/
+│   └── bar.db
+├── templates/
+│   ├── customer.html
+│   ├── admin_login.html
+│   ├── admin.html
+│   ├── inventory.html
+│   └── orders.html
+├── static/
+│   ├── css/
+│   ├── js/
+│   └── images/
+└── README.md
+```
+
+## 주요 기능
+
+### 고객용 UI
+
+-   광고 슬라이드
+-   주문 화면
+-   장바구니
+-   요청사항
+-   제조 진행 화면
+-   제조 완료 화면
+
+### 관리자용 UI
+
+-   관리자 로그인
+-   현재 조인트 각도 표시
+-   로봇 상태 표시
+-   작업 진행 정보
+-   동작 속도 표시
+-   비상정지 / 비상정지 해제
+-   로그 내역
+-   재고 관리
+-   주문 내역 조회
+
+## Database
+
+SQLite3
+
+테이블
+
+-   menu
+-   orders
+-   order_items
+-   staff_requests
+-   robot_logs
+-   robot_state
+
+## ROS2 Interface
+
+### UI → Robot
+
+#### 주문 토픽
+
+-   Topic : `/ui/menu_command`
+-   Message : `bartender_interfaces/msg/Menu`
+
+  메뉴                     코드
+  ---------------------- ------
+  Old Fashioned               0
+  Mojito                      1
+  Whisky Sour                 2
+  Macallan 12                 3
+  Glenfiddich 12              4
+  Jameson                     5
+  Maker's Mark                6
+  Ballantine's 17             7
+  Johnnie Walker Black        8
+
+#### 긴급 정지
+
+-   Topic : `/ui/emergency_stop`
+-   Message : `std_msgs/msg/Bool`
+-   Value : `True`
+
+### Robot → UI
+
+Topic : `/robot/process_state`
+
+Message : `bartender_interfaces/msg/Status`
+
+    Status 의미
+  -------- ----------------
+         0 WAITING
+         1 MAKING
+         2 MAKING_DONE
+         3 DELIVERING
+         4 DELIVERED
+         5 RETURNING_HOME
+
+## 실행 방법
+
+``` bash
+source /opt/ros/humble/setup.bash
+source ~/your_ws/install/setup.bash
+python app.py
+```
+
+고객용 UI
+
+    http://localhost:5000/customer
+
+관리자용 UI
+
+    http://localhost:5000/admin
+
+## 향후 개발
+
+-   ROS2 Action 연동
+-   제조 진행률 자동 반영
+-   Robot Error 표시
+-   실제 레시피 적용
+
+------------------------------------------------------------------------
+
+**Doosan Robotics Boot Camp Project**
